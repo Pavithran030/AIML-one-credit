@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useReducer, useCallback, useMemo } from 'react';
-import { transactionAPI, healthCheck } from './api';
+import { transactionAPI, healthCheck, searchAPI } from './api';
+import Toast from './components/Toast';
+import SearchBar from './components/SearchBar';
+import ExportButton from './components/ExportButton';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS & CONFIG
@@ -74,12 +77,14 @@ const initialState = {
   isLoading: true,
   error: null,
   isSubmitting: false,
+  searchQuery: '',
+  searchResults: null,
 };
 
 function reducer(state, action) {
   switch (action.type) {
     case 'LOAD_TRANSACTIONS':
-      return { ...state, transactions: action.payload, isLoading: false };
+      return { ...state, transactions: action.payload, isLoading: false, searchResults: null };
     case 'ADD_TRANSACTION':
       return { ...state, transactions: [action.payload, ...state.transactions], isFormOpen: false, isSubmitting: false };
     case 'UPDATE_TRANSACTION':
@@ -96,7 +101,7 @@ function reducer(state, action) {
         pendingDelete: null,
       };
     case 'SET_MONTH':
-      return { ...state, currentMonth: action.payload.month, currentYear: action.payload.year, isLoading: true };
+      return { ...state, currentMonth: action.payload.month, currentYear: action.payload.year, isLoading: true, searchResults: null };
     case 'SET_CATEGORY_FILTER':
       return { ...state, selectedCategory: state.selectedCategory === action.payload ? null : action.payload };
     case 'SET_SORT':
@@ -119,6 +124,12 @@ function reducer(state, action) {
       return { ...state, error: action.payload, isLoading: false };
     case 'SET_SUBMITTING':
       return { ...state, isSubmitting: action.payload };
+    case 'SET_SEARCH_QUERY':
+      return { ...state, searchQuery: action.payload };
+    case 'SET_SEARCH_RESULTS':
+      return { ...state, searchResults: action.payload };
+    case 'CLEAR_SEARCH':
+      return { ...state, searchQuery: '', searchResults: null };
     default:
       return state;
   }
@@ -560,10 +571,11 @@ const styles = {
     color: COLORS.bg,
   },
   typeButtonExpense: {
-    borderColor: COLORS.accentRed,
+    border: `2px solid ${COLORS.accentRed}`,
     color: COLORS.accentRed,
   },
   typeButtonExpenseActive: {
+    border: `2px solid ${COLORS.accentRed}`,
     backgroundColor: COLORS.accentRed,
     color: COLORS.bg,
   },
@@ -763,40 +775,77 @@ function SummaryBar({ income, expenses, balance, isMobileView }) {
   );
 }
 
-function FilterBar({ state, dispatch, isMobileView }) {
+function FilterBar({ state, dispatch, isMobileView, transactions }) {
+  const handleSearchChange = (query) => {
+    dispatch({ type: 'SET_SEARCH_QUERY', payload: query });
+  };
+
+  const handleSearchClear = () => {
+    dispatch({ type: 'CLEAR_SEARCH' });
+  };
+
   return (
     <div
       style={{
         ...styles.filterBar,
         padding: isMobileView ? '12px 10px' : styles.filterBar.padding,
-        gap: isMobileView ? '6px' : styles.filterBar.gap,
+        gap: isMobileView ? '8px' : styles.filterBar.gap,
+        flexDirection: isMobileView ? 'column' : 'row',
+        alignItems: isMobileView ? 'stretch' : 'center',
       }}
     >
-      <button
+      {/* Search Bar */}
+      <SearchBar
+        value={state.searchQuery}
+        onChange={handleSearchChange}
+        onClear={handleSearchClear}
+        placeholder="Search transactions..."
+        isMobileView={isMobileView}
+      />
+      
+      {/* Export Button */}
+      <ExportButton transactions={transactions} isMobileView={isMobileView} />
+      
+      {/* Category Filters - Scrollable on mobile */}
+      <div
         style={{
-          ...styles.filterStamp,
-          padding: isMobileView ? '7px 10px' : styles.filterStamp.padding,
-          fontSize: isMobileView ? '12px' : styles.filterStamp.fontSize,
-          ...(state.selectedCategory === null ? styles.filterStampActive : {}),
+          display: 'flex',
+          gap: isMobileView ? '6px' : '8px',
+          overflowX: isMobileView ? 'auto' : 'visible',
+          paddingBottom: isMobileView ? '8px' : 0,
+          WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
         }}
-        onClick={() => dispatch({ type: 'SET_CATEGORY_FILTER', payload: null })}
       >
-        ALL
-      </button>
-      {CATEGORIES.map((cat) => (
         <button
-          key={cat.name}
           style={{
             ...styles.filterStamp,
             padding: isMobileView ? '7px 10px' : styles.filterStamp.padding,
             fontSize: isMobileView ? '12px' : styles.filterStamp.fontSize,
-            ...(state.selectedCategory === cat.name ? styles.filterStampActive : {}),
+            ...(state.selectedCategory === null ? styles.filterStampActive : {}),
+            flexShrink: 0,
           }}
-          onClick={() => dispatch({ type: 'SET_CATEGORY_FILTER', payload: cat.name })}
+          onClick={() => dispatch({ type: 'SET_CATEGORY_FILTER', payload: null })}
         >
-          {cat.code} {cat.name}
+          ALL
         </button>
-      ))}
+        {CATEGORIES.map((cat) => (
+          <button
+            key={cat.name}
+            style={{
+              ...styles.filterStamp,
+              padding: isMobileView ? '7px 10px' : styles.filterStamp.padding,
+              fontSize: isMobileView ? '12px' : styles.filterStamp.fontSize,
+              ...(state.selectedCategory === cat.name ? styles.filterStampActive : {}),
+              flexShrink: 0,
+            }}
+            onClick={() => dispatch({ type: 'SET_CATEGORY_FILTER', payload: cat.name })}
+          >
+            {cat.code} {cat.name}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -807,9 +856,11 @@ function TransactionTable({ state, dispatch, runningBalances, isMobileView }) {
   const [editForm, setEditForm] = useState({});
 
   const sortedTransactions = useMemo(() => {
-    let filtered = [...state.transactions];
+    // Use search results if available, otherwise use regular transactions
+    let filtered = state.searchResults !== null ? [...state.searchResults] : [...state.transactions];
 
-    if (state.selectedCategory) {
+    // Apply category filter only if not searching
+    if (state.selectedCategory && state.searchResults === null) {
       filtered = filtered.filter(t => t.category === state.selectedCategory);
     }
 
@@ -835,7 +886,7 @@ function TransactionTable({ state, dispatch, runningBalances, isMobileView }) {
     });
 
     return filtered;
-  }, [state.transactions, state.selectedCategory, state.sortColumn, state.sortDirection]);
+  }, [state.transactions, state.searchResults, state.selectedCategory, state.sortColumn, state.sortDirection]);
 
   const handleSort = (column) => {
     dispatch({ type: 'SET_SORT', payload: column });
@@ -872,8 +923,9 @@ function TransactionTable({ state, dispatch, runningBalances, isMobileView }) {
       await transactionAPI.delete(state.pendingDelete);
       dispatch({ type: 'DELETE_TRANSACTION', payload: state.pendingDelete });
     } catch (error) {
-      if (error.status === 404) {
-        // In serverless deployments, an already-deleted record can return 404 on retry.
+      // In serverless deployments or with Supabase, an already-deleted record can return 404/not found.
+      // If the error message contains "not found", treat it as success (record is already deleted).
+      if (error.status === 404 || (error.message && error.message.toLowerCase().includes('not found'))) {
         dispatch({ type: 'DELETE_TRANSACTION', payload: state.pendingDelete });
         return;
       }
@@ -1185,8 +1237,8 @@ function TransactionTable({ state, dispatch, runningBalances, isMobileView }) {
                   onMouseEnter={() => setHoveredRow(transaction.id)}
                   onMouseLeave={() => setHoveredRow(null)}
                 >
-                  {isPendingDelete && <div style={styles.voidStamp}>VOID</div>}
-                  <td style={styles.tableCell}>
+                  <td style={{ ...styles.tableCell, position: 'relative' }}>
+                    {isPendingDelete && <div style={styles.voidStamp}>VOID</div>}
                     <span style={styles.dateCell}>{transaction.date}</span>
                   </td>
                   <td style={styles.tableCell}>
@@ -1256,8 +1308,8 @@ function TransactionTable({ state, dispatch, runningBalances, isMobileView }) {
                 </tr>
                 {isExpanded && !isPendingDelete && (
                   <tr>
-                    <td colSpan={7} style={{ padding: 0 }}>
-                      <div style={styles.expandedRow}>
+                    <td colSpan={7} style={{ padding: 0, borderBottom: `2px solid ${COLORS.text}` }}>
+                      <div style={{ ...styles.expandedRow, padding: '16px', backgroundColor: COLORS.bgAlt }}>
                         {isEditing ? (
                           <>
                             <div style={styles.expandedField}>
@@ -1391,18 +1443,29 @@ function TransactionTable({ state, dispatch, runningBalances, isMobileView }) {
   );
 }
 
-function AddTransactionForm({ state, dispatch, onTransactionAdded, isMobileView }) {
+function AddTransactionForm({ state, dispatch, onTransactionAdded, isMobileView, showToast }) {
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     type: 'expense',
     category: 'FOOD',
     description: '',
     amount: '',
+    payment_method: 'cash',
+    notes: '',
   });
 
   const getCategoriesForType = (type) => {
     return type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
   };
+
+  const PAYMENT_METHODS = [
+    { value: 'cash', label: 'Cash' },
+    { value: 'card', label: 'Card' },
+    { value: 'upi', label: 'UPI' },
+    { value: 'credit', label: 'Credit' },
+    { value: 'bank_transfer', label: 'Bank Transfer' },
+    { value: 'other', label: 'Other' },
+  ];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1417,11 +1480,14 @@ function AddTransactionForm({ state, dispatch, onTransactionAdded, isMobileView 
       description: formData.description,
       amount: parseFloat(formData.amount),
       month: getMonthKey(state.currentYear, state.currentMonth),
+      payment_method: formData.payment_method,
+      notes: formData.notes,
     };
 
     try {
       const created = await transactionAPI.create(newTransaction);
       dispatch({ type: 'ADD_TRANSACTION', payload: created });
+      showToast('Transaction added successfully!', 'success');
       onTransactionAdded();
       setFormData({
         date: new Date().toISOString().split('T')[0],
@@ -1429,9 +1495,12 @@ function AddTransactionForm({ state, dispatch, onTransactionAdded, isMobileView 
         category: 'FOOD',
         description: '',
         amount: '',
+        payment_method: 'cash',
+        notes: '',
       });
     } catch (error) {
       console.error('Failed to create transaction:', error);
+      showToast('Failed to add transaction', 'error');
       dispatch({ type: 'SET_ERROR', payload: 'Failed to create transaction' });
     } finally {
       dispatch({ type: 'SET_SUBMITTING', payload: false });
@@ -1534,7 +1603,12 @@ function AddTransactionForm({ state, dispatch, onTransactionAdded, isMobileView 
           </div>
 
           <div style={styles.formGroup}>
-            <label style={styles.formLabel}>CATEGORY</label>
+            <label style={{ ...styles.formLabel, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>CATEGORY</span>
+              <span style={{ fontSize: '11px', opacity: 0.6, fontFamily: '"Courier Prime", monospace' }}>
+                {formData.type === 'income' ? '💰 Income Source' : '💸 Expense Type'}
+              </span>
+            </label>
             <select
               style={styles.formSelect}
               value={formData.category}
@@ -1571,6 +1645,35 @@ function AddTransactionForm({ state, dispatch, onTransactionAdded, isMobileView 
               min="0"
               step="0.01"
               required
+            />
+          </div>
+
+          <div style={styles.formGroup}>
+            <label style={styles.formLabel}>PAYMENT METHOD</label>
+            <select
+              style={styles.formSelect}
+              value={formData.payment_method}
+              onChange={(e) => setFormData({ ...formData, payment_method: e.target.value })}
+            >
+              {PAYMENT_METHODS.map((method) => (
+                <option key={method.value} value={method.value}>
+                  {method.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={styles.formGroup}>
+            <label style={styles.formLabel}>NOTES (OPTIONAL)</label>
+            <textarea
+              style={{
+                ...styles.formInput,
+                minHeight: '80px',
+                resize: 'vertical',
+              }}
+              value={formData.notes}
+              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              placeholder="Add any additional notes..."
             />
           </div>
 
@@ -1699,10 +1802,12 @@ function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [formHovered, setFormHovered] = useState(false);
   const [apiError, setApiError] = useState(null);
+  const [dbConnected, setDbConnected] = useState(null); // null = checking, true = connected, false = error
   const [isMobileView, setIsMobileView] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.innerWidth <= 768;
   });
+  const [toast, setToast] = useState(null); // { message, type }
 
   useEffect(() => {
     const updateViewport = () => setIsMobileView(window.innerWidth <= 768);
@@ -1710,6 +1815,24 @@ function App() {
     updateViewport();
     window.addEventListener('resize', updateViewport);
     return () => window.removeEventListener('resize', updateViewport);
+  }, []);
+
+  // Health check on initial load
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const health = await healthCheck();
+        setDbConnected(health !== null);
+        if (health === null) {
+          setApiError('Database connection failed. Please check your Supabase configuration.');
+        }
+      } catch (error) {
+        setDbConnected(false);
+        setApiError('Database connection failed. Please check your Supabase configuration.');
+      }
+    };
+
+    checkHealth();
   }, []);
 
   // Load transactions when month/year changes
@@ -1730,6 +1853,25 @@ function App() {
 
     loadTransactions();
   }, [state.currentYear, state.currentMonth]);
+
+  // Search functionality with debounce
+  useEffect(() => {
+    const searchTimeout = setTimeout(async () => {
+      if (state.searchQuery && state.searchQuery.trim().length >= 2) {
+        try {
+          const monthKey = getMonthKey(state.currentYear, state.currentMonth);
+          const results = await searchAPI.search(state.searchQuery, monthKey);
+          dispatch({ type: 'SET_SEARCH_RESULTS', payload: results });
+        } catch (error) {
+          console.error('Search failed:', error);
+        }
+      } else if (state.searchQuery === '') {
+        dispatch({ type: 'CLEAR_SEARCH' });
+      }
+    }, 300);
+
+    return () => clearTimeout(searchTimeout);
+  }, [state.searchQuery, state.currentYear, state.currentMonth]);
 
   // Calculate category totals
   const categoryTotals = useMemo(() => {
@@ -1770,7 +1912,8 @@ function App() {
     const balances = {};
     let runningBalance = 0;
 
-    // Sort by date for running balance calculation
+    // Sort by date ASC for correct running balance calculation
+    // (oldest transactions first, so balance accumulates correctly)
     const sorted = [...state.transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
 
     sorted.forEach((t) => {
@@ -1838,7 +1981,8 @@ function App() {
       .catch(console.error);
   };
 
-  if (state.isLoading && state.transactions.length === 0) {
+  if (dbConnected === null) {
+    // Still checking health
     return (
       <div style={styles.app}>
         <div style={styles.grainOverlay} />
@@ -1949,7 +2093,12 @@ function App() {
           />
 
           {/* Filter Bar */}
-          <FilterBar state={state} dispatch={dispatch} isMobileView={isMobileView} />
+          <FilterBar 
+            state={state} 
+            dispatch={dispatch} 
+            isMobileView={isMobileView} 
+            transactions={state.transactions}
+          />
 
           {/* Transaction Table */}
           <TransactionTable
@@ -1986,11 +2135,21 @@ function App() {
         dispatch={dispatch}
         onTransactionAdded={handleTransactionAdded}
         isMobileView={isMobileView}
+        showToast={(message, type) => setToast({ message, type })}
       />
 
       {/* Mobile Sidebar (Bottom Tab Bar) */}
       {isMobileView && (
         <MobileSidebar state={state} dispatch={dispatch} categoryTotals={categoryTotals} />
+      )}
+
+      {/* Toast Notifications */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
       )}
 
       {/* SVG Filters for noise */}
