@@ -32,7 +32,16 @@
     <!-- PWA Service Worker Registration -->
     <script>
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
+        const isLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+
+        window.addEventListener('load', async () => {
+          if (isLocalhost) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+            console.log('SW disabled on localhost development.');
+            return;
+          }
+
           navigator.serviceWorker.register('/sw.js')
             .then((registration) => {
               console.log('SW registered:', registration.scope);
