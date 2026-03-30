@@ -664,41 +664,6 @@ const styles = {
     cursor: 'pointer',
     marginTop: '16px',
   },
-  notificationCard: {
-    position: 'fixed',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    backgroundColor: COLORS.bg,
-    border: `4px solid ${COLORS.accentRed}`,
-    padding: '32px 48px',
-    zIndex: 300,
-    boxShadow: '0 4px 24px rgba(0,0,0,0.2)',
-    textAlign: 'center',
-    maxWidth: '90%',
-    width: '450px',
-  },
-  notificationTitle: {
-    fontFamily: '"Bebas Neue", sans-serif',
-    fontSize: '28px',
-    letterSpacing: '2px',
-    marginBottom: '16px',
-    color: COLORS.accentRed,
-  },
-  notificationMessage: {
-    fontFamily: '"Courier Prime", monospace',
-    fontSize: '16px',
-    lineHeight: '1.6',
-  },
-  notificationOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    width: '100vw',
-    height: '100vh',
-    backgroundColor: 'rgba(13, 13, 13, 0.5)',
-    zIndex: 299,
-  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2089,7 +2054,7 @@ function App() {
                 letterSpacing: isMobileView ? '2px' : styles.headerTitle.letterSpacing,
               }}
             >
-              LEDGER
+              LEDGER - Expense Tracker  
             </h1>
 
             <div
